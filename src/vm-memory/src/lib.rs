@@ -22,6 +22,7 @@ pub type GuestRegionMmap = vm_memory_upstream::GuestRegionMmap<Option<AtomicBitm
 pub type GuestMmapRegion = vm_memory_upstream::MmapRegion<Option<AtomicBitmap>>;
 
 const GUARD_PAGE_COUNT: usize = 1;
+const GUARD_PMEM_LEN: u32 = 4096;
 
 /// Build a `MmapRegion` surrounded by guard pages.
 ///
@@ -94,27 +95,22 @@ fn build_guarded_region(
             return Err(MmapRegionError::Mmap(IoError::last_os_error()));
         }
     } else {
-        let (file_ref_from_pmem) = match maybe_file_offset {
-            Some(ref file_offset) => {
-                check_file_offset(file_offset, size)?;
-                (file_offset.file())
-            }
-            None => (-1),
-        };
+        let mapped_len = null;
         let region_addr = unsafe {
             libc::pmem_map_file(
-
+                file_path,
+                GUARD_PMEM_LEN,
+                libc::PMEM_FILE_CREATE, //verify is ok or not
+                0666,
+                size.as_ptr(),          //verify is ok or not
+                is_pmem.as_ptr(),
             )
-            // libc::mmap(
-            //     region_start_addr as *mut libc::c_void,
-            //     size,
-            //     prot,
-            //     flags | libc::MAP_FIXED,
-            //     fd,
-            //     offset as libc::off_t,
-            // )
         };
-    }
+            if region_addr.is_null() {
+                panic!("[pmem_map_file] failed {}", errno());
+            }
+        };
+    
 
 
     let bitmap = match track_dirty_pages {
@@ -136,6 +132,8 @@ pub fn create_guest_memory(
     regions: &[(Option<FileOffset>, GuestAddress, usize)],
     track_dirty_pages: bool,
 ) -> std::result::Result<GuestMemoryMmap, Error> {
+    let is_pmem = false;
+    let file_path = null;
     let prot = libc::PROT_READ | libc::PROT_WRITE;
     let mut mmap_regions = Vec::with_capacity(regions.len());
 
@@ -146,7 +144,7 @@ pub fn create_guest_memory(
         };
 
         let mmap_region =
-            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages)
+            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages, is_pmem, file_path)
                 .map_err(Error::MmapRegion)?;
 
         mmap_regions.push(GuestRegionMmap::new(mmap_region, region.1)?);
