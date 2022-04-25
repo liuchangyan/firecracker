@@ -42,6 +42,8 @@ fn build_guarded_region(
     prot: i32,
     flags: i32,
     track_dirty_pages: bool,
+    is_pmem: bool,
+    file_path: &Path,
 ) -> Result<GuestMmapRegion, MmapRegionError> {
     let page_size = utils::get_page_size().expect("Cannot retrieve page size.");
     // Create the guarded range size (received size + X pages),
@@ -64,32 +66,56 @@ fn build_guarded_region(
         return Err(MmapRegionError::Mmap(IoError::last_os_error()));
     }
 
-    let (fd, offset) = match maybe_file_offset {
-        Some(ref file_offset) => {
-            check_file_offset(file_offset, size)?;
-            (file_offset.file().as_raw_fd(), file_offset.start())
-        }
-        None => (-1, 0),
-    };
-
-    let region_start_addr = guard_addr as usize + page_size * GUARD_PAGE_COUNT;
-
     // Inside the protected range, starting with guard_addr + PAGE_SIZE,
     // map the requested range with received protection and flags
-    let region_addr = unsafe {
-        libc::mmap(
-            region_start_addr as *mut libc::c_void,
-            size,
-            prot,
-            flags | libc::MAP_FIXED,
-            fd,
-            offset as libc::off_t,
-        )
-    };
+    if is_pmem == false {
+        let (fd, offset) = match maybe_file_offset {
+            Some(ref file_offset) => {
+                check_file_offset(file_offset, size)?;
+                (file_offset.file().as_raw_fd(), file_offset.start())
+            }
+            None => (-1, 0),
+        };
+    
+        let region_start_addr = guard_addr as usize + page_size * GUARD_PAGE_COUNT;    
 
-    if region_addr == libc::MAP_FAILED {
-        return Err(MmapRegionError::Mmap(IoError::last_os_error()));
+        let region_addr = unsafe {
+            libc::mmap(
+                region_start_addr as *mut libc::c_void,
+                size,
+                prot,
+                flags | libc::MAP_FIXED,
+                fd,
+                offset as libc::off_t,
+            )
+        };
+
+        if region_addr == libc::MAP_FAILED {
+            return Err(MmapRegionError::Mmap(IoError::last_os_error()));
+        }
+    } else {
+        let (file_ref_from_pmem) = match maybe_file_offset {
+            Some(ref file_offset) => {
+                check_file_offset(file_offset, size)?;
+                (file_offset.file())
+            }
+            None => (-1),
+        };
+        let region_addr = unsafe {
+            libc::pmem_map_file(
+
+            )
+            // libc::mmap(
+            //     region_start_addr as *mut libc::c_void,
+            //     size,
+            //     prot,
+            //     flags | libc::MAP_FIXED,
+            //     fd,
+            //     offset as libc::off_t,
+            // )
+        };
     }
+
 
     let bitmap = match track_dirty_pages {
         true => Some(AtomicBitmap::with_len(size)),
@@ -121,6 +147,32 @@ pub fn create_guest_memory(
 
         let mmap_region =
             build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages)
+                .map_err(Error::MmapRegion)?;
+
+        mmap_regions.push(GuestRegionMmap::new(mmap_region, region.1)?);
+    }
+
+    GuestMemoryMmap::from_regions(mmap_regions)
+}
+
+/// Helper for creating the guest memory from snapshot.
+pub fn create_guest_memory_from_snapshot(
+    regions: &[(Option<FileOffset>, GuestAddress, usize)],
+    track_dirty_pages: bool,
+    file_path: &Path,
+) -> std::result::Result<GuestMemoryMmap, Error> {
+    let is_pmem = true;
+    let prot = libc::PROT_READ | libc::PROT_WRITE;
+    let mut mmap_regions = Vec::with_capacity(regions.len());
+
+    for region in regions {
+        let flags = match region.0 {
+            None => libc::MAP_NORESERVE | libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            Some(_) => libc::MAP_NORESERVE | libc::MAP_PRIVATE,
+        };
+
+        let mmap_region =
+            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages, is_pmem, file_path)
                 .map_err(Error::MmapRegion)?;
 
         mmap_regions.push(GuestRegionMmap::new(mmap_region, region.1)?);

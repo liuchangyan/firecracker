@@ -56,6 +56,7 @@ where
     /// and a `state` containing mapping information.
     fn restore(
         file: &File,
+        file_path: &Path,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
     ) -> std::result::Result<Self, Error>;
@@ -180,10 +181,11 @@ impl SnapshotMemory for GuestMemoryMmap {
     /// and a `state` containing mapping information.
     fn restore(
         file: &File,
+        file_path: &Path,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
     ) -> std::result::Result<Self, Error> {
-        vm_memory::create_guest_memory(
+        vm_memory::create_guest_memory_from_snapshot(
             &state
                 .regions
                 .iter()
@@ -196,6 +198,7 @@ impl SnapshotMemory for GuestMemoryMmap {
                 })
                 .collect::<Vec<_>>(),
             track_dirty_pages,
+            file_path,
         )
         .map_err(Error::CreateMemory)
     }
