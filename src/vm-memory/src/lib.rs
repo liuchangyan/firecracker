@@ -14,6 +14,7 @@ pub use vm_memory_upstream::{
 use std::io::Error as IoError;
 use std::os::unix::io::AsRawFd;
 use std::ptr::NonNull;
+use std::path::Path;
 use std::path::PathBuf;
 use std::ffi::CString;
 
@@ -143,7 +144,9 @@ pub fn create_guest_memory(
     track_dirty_pages: bool,
 ) -> std::result::Result<GuestMemoryMmap, Error> {
     let is_pmem = 0 as *mut i32;
-    let file_path_buf;
+    let path = Path::new("");
+    let mut file_path_buf = PathBuf::new();
+    file_path_buf.push(path);
     let prot = libc::PROT_READ | libc::PROT_WRITE;
     let mut mmap_regions = Vec::with_capacity(regions.len());
 
@@ -154,7 +157,7 @@ pub fn create_guest_memory(
         };
 
         let mmap_region =
-            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages, is_pmem, file_path_buf)
+            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages, is_pmem, &file_path_buf)
                 .map_err(Error::MmapRegion)?;
 
         mmap_regions.push(GuestRegionMmap::new(mmap_region, region.1)?);

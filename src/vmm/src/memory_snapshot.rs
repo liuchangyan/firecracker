@@ -57,7 +57,7 @@ where
     /// Creates a GuestMemoryMmap given a `file` containing the data
     /// and a `state` containing mapping information.
     fn restore(
-        file: &Path,
+        file: &File,
         file_path: &PathBuf,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
