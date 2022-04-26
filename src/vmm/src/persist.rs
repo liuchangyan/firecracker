@@ -7,6 +7,7 @@ use std::fmt::{Display, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::builder::{self, StartMicrovmError};
@@ -449,6 +450,7 @@ pub fn restore_from_snapshot(
 
     let guest_memory = guest_memory_from_file(
         &params.mem_file_path,
+        &params.mem_file_path,
         &microvm_state.memory_state,
         track_dirty_pages,
     )?;
@@ -478,12 +480,13 @@ fn snapshot_state_from_file(
 
 fn guest_memory_from_file(
     mem_file_path: &Path,
+    mem_file_path_buf: &PathBuf,
     mem_state: &GuestMemoryState,
     track_dirty_pages: bool,
 ) -> std::result::Result<GuestMemoryMmap, LoadSnapshotError> {
     use self::LoadSnapshotError::{DeserializeMemory, MemoryBackingFile};
     let mem_file = File::open(mem_file_path).map_err(MemoryBackingFile)?;
-    GuestMemoryMmap::restore(&mem_file, mem_file_path, mem_state, track_dirty_pages).map_err(DeserializeMemory)
+    GuestMemoryMmap::restore(&mem_file, mem_file_path_buf, mem_state, track_dirty_pages).map_err(DeserializeMemory)
 }
 
 #[cfg(target_arch = "x86_64")]

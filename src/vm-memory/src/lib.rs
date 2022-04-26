@@ -14,7 +14,8 @@ pub use vm_memory_upstream::{
 use std::io::Error as IoError;
 use std::os::unix::io::AsRawFd;
 use std::ptr::NonNull;
-use std::path::Path;
+use std::path::PathBuf;
+use std::ffi::CString;
 
 use libc::*;
 
@@ -48,8 +49,8 @@ fn build_guarded_region(
     prot: i32,
     flags: i32,
     track_dirty_pages: bool,
-    is_pmem: bool,
-    file_path: &Path,
+    is_pmem: *mut i32,
+    file_path_buf: &PathBuf,
 ) -> Result<GuestMmapRegion, MmapRegionError> {
     let page_size = utils::get_page_size().expect("Cannot retrieve page size.");
     // Create the guarded range size (received size + X pages),
@@ -75,7 +76,8 @@ fn build_guarded_region(
     let region_addr;
     // Inside the protected range, starting with guard_addr + PAGE_SIZE,
     // map the requested range with received protection and flags
-    if is_pmem == false {
+    let is_pmem_flag = 0 as *mut i32;
+    if is_pmem == is_pmem_flag {
         let (fd, offset) = match maybe_file_offset {
             Some(ref file_offset) => {
                 check_file_offset(file_offset, size)?;
@@ -102,18 +104,22 @@ fn build_guarded_region(
         }
     } else {
         let mapped_len: NonNull<usize> = NonNull::<usize>::dangling();
+        let filename = CString::new(file_path_buf.as_path().display().to_string()).unwrap();
+        let file_input: *const c_char = filename.as_ptr() as *const c_char;
+
         region_addr = unsafe {
             pmem_map_file(
-                file_path,
+                file_input,
                 GUARD_PMEM_LEN,
                 PMEM_FILE_CREATE, 
                 0666,
                 mapped_len.as_ptr(),        
-                &is_pmem,
+                is_pmem,
             )
         };
         if region_addr.is_null() {
-            return Err("[pmem_map_file] failed".to_string());
+            panic!("[pmem_map_file]:mapped_len is null");
+            // return Err(MmapRegionError::Mmap(IoError::last_os_error()));
         }
     };
     
@@ -136,8 +142,8 @@ pub fn create_guest_memory(
     regions: &[(Option<FileOffset>, GuestAddress, usize)],
     track_dirty_pages: bool,
 ) -> std::result::Result<GuestMemoryMmap, Error> {
-    let is_pmem = false;
-    let file_path;
+    let is_pmem = 0 as *mut i32;
+    let file_path_buf;
     let prot = libc::PROT_READ | libc::PROT_WRITE;
     let mut mmap_regions = Vec::with_capacity(regions.len());
 
@@ -148,7 +154,7 @@ pub fn create_guest_memory(
         };
 
         let mmap_region =
-            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages, is_pmem, file_path)
+            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages, is_pmem, file_path_buf)
                 .map_err(Error::MmapRegion)?;
 
         mmap_regions.push(GuestRegionMmap::new(mmap_region, region.1)?);
@@ -161,9 +167,9 @@ pub fn create_guest_memory(
 pub fn create_guest_memory_from_snapshot(
     regions: &[(Option<FileOffset>, GuestAddress, usize)],
     track_dirty_pages: bool,
-    file_path: &Path,
+    file_path_buf: &PathBuf,
 ) -> std::result::Result<GuestMemoryMmap, Error> {
-    let is_pmem = true;
+    let is_pmem = 1 as *mut i32;
     let prot = libc::PROT_READ | libc::PROT_WRITE;
     let mut mmap_regions = Vec::with_capacity(regions.len());
 
@@ -174,7 +180,7 @@ pub fn create_guest_memory_from_snapshot(
         };
 
         let mmap_region =
-            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages, is_pmem, file_path)
+            build_guarded_region(region.0.clone(), region.2, prot, flags, track_dirty_pages, is_pmem, file_path_buf)
                 .map_err(Error::MmapRegion)?;
 
         mmap_regions.push(GuestRegionMmap::new(mmap_region, region.1)?);

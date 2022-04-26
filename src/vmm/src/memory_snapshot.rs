@@ -7,6 +7,7 @@ use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::SeekFrom;
 use std::path::Path;
+use std::path::PathBuf;
 
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -57,7 +58,7 @@ where
     /// and a `state` containing mapping information.
     fn restore(
         file: &Path,
-        file_path: &String,
+        file_path: &PathBuf,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
     ) -> std::result::Result<Self, Error>;
@@ -182,7 +183,7 @@ impl SnapshotMemory for GuestMemoryMmap {
     /// and a `state` containing mapping information.
     fn restore(
         file: &File,
-        file_path: &Path,
+        file_path: &PathBuf,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
     ) -> std::result::Result<Self, Error> {
