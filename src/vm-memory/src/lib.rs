@@ -13,6 +13,10 @@ pub use vm_memory_upstream::{
 
 use std::io::Error as IoError;
 use std::os::unix::io::AsRawFd;
+use std::ptr::NonNull;
+use std::path::Path;
+
+use libc::*;
 
 use vm_memory_upstream::bitmap::AtomicBitmap;
 use vm_memory_upstream::mmap::{check_file_offset, NewBitmap};
@@ -22,7 +26,8 @@ pub type GuestRegionMmap = vm_memory_upstream::GuestRegionMmap<Option<AtomicBitm
 pub type GuestMmapRegion = vm_memory_upstream::MmapRegion<Option<AtomicBitmap>>;
 
 const GUARD_PAGE_COUNT: usize = 1;
-const GUARD_PMEM_LEN: u32 = 4096;
+const GUARD_PMEM_LEN: usize = 4096;
+const PMEM_FILE_CREATE: c_int = 1 << 0;
 
 /// Build a `MmapRegion` surrounded by guard pages.
 ///
@@ -67,6 +72,7 @@ fn build_guarded_region(
         return Err(MmapRegionError::Mmap(IoError::last_os_error()));
     }
 
+    let region_addr;
     // Inside the protected range, starting with guard_addr + PAGE_SIZE,
     // map the requested range with received protection and flags
     if is_pmem == false {
@@ -80,7 +86,7 @@ fn build_guarded_region(
     
         let region_start_addr = guard_addr as usize + page_size * GUARD_PAGE_COUNT;    
 
-        let region_addr = unsafe {
+        region_addr = unsafe {
             libc::mmap(
                 region_start_addr as *mut libc::c_void,
                 size,
@@ -95,24 +101,22 @@ fn build_guarded_region(
             return Err(MmapRegionError::Mmap(IoError::last_os_error()));
         }
     } else {
-        let mapped_len = null;
-        let region_addr = unsafe {
-            libc::pmem_map_file(
+        let mapped_len: NonNull<usize> = NonNull::<usize>::dangling();
+        region_addr = unsafe {
+            pmem_map_file(
                 file_path,
                 GUARD_PMEM_LEN,
-                libc::PMEM_FILE_CREATE, //verify is ok or not
+                PMEM_FILE_CREATE, 
                 0666,
-                size.as_ptr(),          //verify is ok or not
-                is_pmem.as_ptr(),
+                mapped_len.as_ptr(),        
+                &is_pmem,
             )
         };
-            if region_addr.is_null() {
-                panic!("[pmem_map_file] failed {}", errno());
-            }
-        };
+        if region_addr.is_null() {
+            return Err("[pmem_map_file] failed".to_string());
+        }
+    };
     
-
-
     let bitmap = match track_dirty_pages {
         true => Some(AtomicBitmap::with_len(size)),
         false => None,
@@ -133,7 +137,7 @@ pub fn create_guest_memory(
     track_dirty_pages: bool,
 ) -> std::result::Result<GuestMemoryMmap, Error> {
     let is_pmem = false;
-    let file_path = null;
+    let file_path;
     let prot = libc::PROT_READ | libc::PROT_WRITE;
     let mut mmap_regions = Vec::with_capacity(regions.len());
 
@@ -488,4 +492,23 @@ mod tests {
                 .unwrap();
         }
     }
+}
+
+/* *****************
+ *   Mappings
+ * ****************/
+
+#[link(name = "pmem")]
+extern "C" {
+    pub fn pmem_map_file(
+        path: *const c_char,
+        len: usize,
+        flags: c_int,
+        mode: mode_t,
+        mapped_lenp: *mut usize,
+        is_pmemp: *mut c_int,
+    ) -> *mut c_void;
+    pub fn pmem_msync(addr: *const c_void, len: usize) -> c_int;
+    pub fn pmem_persist(addr: *const c_void, len: usize);
+    pub fn pmem_unmap(addr: *mut c_void, len: usize) -> c_int;
 }

@@ -6,6 +6,7 @@
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::SeekFrom;
+use std::path::Path;
 
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -55,8 +56,8 @@ where
     /// Creates a GuestMemoryMmap given a `file` containing the data
     /// and a `state` containing mapping information.
     fn restore(
-        file: &File,
-        file_path: &Path,
+        file: &Path,
+        file_path: &String,
         state: &GuestMemoryState,
         track_dirty_pages: bool,
     ) -> std::result::Result<Self, Error>;
