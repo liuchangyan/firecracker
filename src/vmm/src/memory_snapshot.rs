@@ -6,7 +6,6 @@
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::SeekFrom;
-use std::path::Path;
 use std::path::PathBuf;
 
 use versionize::{VersionMap, Versionize, VersionizeResult};
