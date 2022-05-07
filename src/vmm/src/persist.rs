@@ -30,7 +30,7 @@ use cpuid::common::{get_vendor_id_from_cpuid, get_vendor_id_from_host};
 use crate::vmm_config::instance_info::InstanceInfo;
 #[cfg(target_arch = "aarch64")]
 use arch::regs::{get_manufacturer_id_from_host, get_manufacturer_id_from_state};
-use logger::{error, info};
+use logger::{error, info, debug};
 use seccompiler::BpfThreadMap;
 use snapshot::Snapshot;
 use versionize::{VersionMap, Versionize, VersionizeResult};

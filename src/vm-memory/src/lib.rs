@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::ffi::CString;
 
 use libc::*;
+use logger::{info};
 
 use vm_memory_upstream::bitmap::AtomicBitmap;
 use vm_memory_upstream::mmap::{check_file_offset, NewBitmap};
@@ -27,8 +28,8 @@ pub type GuestRegionMmap = vm_memory_upstream::GuestRegionMmap<Option<AtomicBitm
 pub type GuestMmapRegion = vm_memory_upstream::MmapRegion<Option<AtomicBitmap>>;
 
 const GUARD_PAGE_COUNT: usize = 1;
-const GUARD_PMEM_LEN: usize = 4096;
-const PMEM_FILE_CREATE: c_int = 1 << 0;
+
+const PMEM_MOUNT_POINT: &str = "/mnt/pmem0";
 
 /// Build a `MmapRegion` surrounded by guard pages.
 ///
@@ -77,9 +78,10 @@ fn build_guarded_region(
     // Inside the protected range, starting with guard_addr + PAGE_SIZE,
     // map the requested range with received protection and flags
     // is_pmem_flag decides whether to use pmem
-    let is_pmem_flag: *mut c_int = Box::into_raw(Box::new(0));
-    let mem_flag: bool = unsafe { is_pmem.as_ref() == is_pmem_flag.as_ref() };
-    if mem_flag {
+    let is_pmem_flag: *mut c_int = Box::into_raw(Box::new(1));
+    let is_mmap_flag: bool = unsafe { is_pmem.as_ref() != is_pmem_flag.as_ref() };
+    if is_mmap_flag {
+        info!("---------------------------into mmap---------------------------");
         let (fd, offset) = match maybe_file_offset {
             Some(ref file_offset) => {
                 check_file_offset(file_offset, size)?;
@@ -105,23 +107,24 @@ fn build_guarded_region(
             return Err(MmapRegionError::Mmap(IoError::last_os_error()));
         }
     } else {
+        info!("------------------------into pmem_map_file------------------------");
         let mapped_len: *mut size_t = Box::into_raw(Box::new(0));
-        let filename = CString::new(file_path_buf.as_path().display().to_string()).unwrap();
-        let file_input: *const c_char = filename.as_ptr() as *const c_char;
-
+        let file_name = CString::new(file_path_buf.as_path().display().to_string()).unwrap();
+        // info!("file_name is {:?}", file_name);
+        let file_input: *const c_char = file_name.as_ptr() as *const c_char;
+        // info!("file_input is {:?}", file_input);
         region_addr = unsafe {
             pmem_map_file(
                 file_input,
-                GUARD_PMEM_LEN,
-                PMEM_FILE_CREATE, 
+                0, 
+                0,
                 0666,
                 mapped_len,        
                 is_pmem,
             )
         };
         if region_addr.is_null() || is_pmem.is_null() || mapped_len.is_null() {
-            panic!("[pmem_map_file]:mapped_len is null");
-            // return Err(MmapRegionError::Mmap(IoError::last_os_error()));
+            panic!("[pmem_map_file]:error ");
         }
     };
     
@@ -173,10 +176,18 @@ pub fn create_guest_memory_from_snapshot(
     track_dirty_pages: bool,
     file_path_buf: &PathBuf,
 ) -> std::result::Result<GuestMemoryMmap, Error> {
-    let is_pmem: *mut c_int = Box::into_raw(Box::new(1));
+    let file_parent_path = file_path_buf.as_path().parent().unwrap();
+    let mount_flag = Path::new(PMEM_MOUNT_POINT);
+    let is_pmem: *mut c_int;
+    if mount_flag == file_parent_path {
+        is_pmem = Box::into_raw(Box::new(1));
+    } else {
+        is_pmem = Box::into_raw(Box::new(1));
+    }
     let prot = libc::PROT_READ | libc::PROT_WRITE;
     let mut mmap_regions = Vec::with_capacity(regions.len());
 
+    info!("-----------------into create_guest_memory_from_snapshot---------------");
     for region in regions {
         let flags = match region.0 {
             None => libc::MAP_NORESERVE | libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
